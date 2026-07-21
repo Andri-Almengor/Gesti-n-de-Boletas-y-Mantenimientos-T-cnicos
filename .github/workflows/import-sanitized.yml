@@ -36,8 +36,10 @@ jobs:
             find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) || true
             echo 'REFERENCIAS INTERNAS:'
             grep -RInE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' . --exclude-dir=.git || true
-            echo 'ENLACES O LLAVES:'
-            grep -RInE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/|-----BEGIN [A-Z ]*PRIVATE KEY-----' . --exclude-dir=.git || true
+            echo 'ENLACES PRIVADOS:'
+            grep -RInE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/' . --exclude-dir=.git || true
+            echo 'LLAVES PRIVADAS:'
+            grep -RInF -- '-----BEGIN PRIVATE KEY-----' . --exclude-dir=.git || true
           } > /tmp/sanitization-audit.txt
 
       - name: Verificar archivos y referencias bloqueadas
@@ -53,7 +55,11 @@ jobs:
             cat /tmp/sanitization-audit.txt
             exit 1
           fi
-          if grep -RIlE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/|-----BEGIN [A-Z ]*PRIVATE KEY-----' . --exclude-dir=.git | grep -q .; then
+          if grep -RIlE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/' . --exclude-dir=.git | grep -q .; then
+            cat /tmp/sanitization-audit.txt
+            exit 1
+          fi
+          if grep -RIlF -- '-----BEGIN PRIVATE KEY-----' . --exclude-dir=.git | grep -q .; then
             cat /tmp/sanitization-audit.txt
             exit 1
           fi

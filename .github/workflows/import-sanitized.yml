@@ -1,27 +1,20 @@
-name: Importar versión pública sanitizada
+name: Generar copia pública sanitizada
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/import-sanitized.yml'
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
-  import-sanitized:
-    if: github.actor != 'github-actions[bot]'
+  sanitize-and-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Descargar repositorio de destino
+      - name: Descargar herramientas de sanitización
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
 
       - name: Descargar aplicación actual
         uses: actions/checkout@v4
@@ -62,15 +55,10 @@ jobs:
           npm ci
           npm run check --if-present
 
-      - name: Publicar con historial nuevo
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git checkout --orphan sanitized-main
-          git rm -rf . >/dev/null 2>&1 || true
-          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-          cp -a /tmp/gestion-tecnica-publica/. .
-          git add -A
-          git commit -m 'Publicar versión genérica y sanitizada del sistema'
-          git push --force origin HEAD:main
+      - name: Empaquetar repositorio sanitizado
+        uses: actions/upload-artifact@v4
+        with:
+          name: repositorio-sanitizado
+          path: /tmp/gestion-tecnica-publica
+          include-hidden-files: true
+          retention-days: 1

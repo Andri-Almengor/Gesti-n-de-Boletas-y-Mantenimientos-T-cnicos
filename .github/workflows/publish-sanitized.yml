@@ -1,0 +1,96 @@
+name: Publicar copia sanitizada
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.title == 'Ejecutar copia pública sanitizada'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar herramientas seguras desde main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Descargar aplicación actual
+        uses: actions/checkout@v4
+        with:
+          repository: Andri-Almengor/dms-boletas
+          ref: main
+          path: source-app
+          fetch-depth: 1
+
+      - name: Crear copia sanitizada
+        run: python3 .github/scripts/sanitize_public_copy.py source-app /tmp/gestion-tecnica-publica
+
+      - name: Eliminar identificadores residuales de archivos
+        shell: bash
+        run: |
+          ROOT=/tmp/gestion-tecnica-publica
+          if [ -f "$ROOT/public/icons/dms-icon.svg" ]; then
+            mv "$ROOT/public/icons/dms-icon.svg" "$ROOT/public/icons/gt-icon.svg"
+          fi
+          rm -rf "$ROOT/node_modules" "$ROOT/backend/node_modules" "$ROOT/dist" "$ROOT/backend/dist" "$ROOT/coverage" "$ROOT/backend/coverage"
+
+      - name: Auditar copia pública
+        shell: bash
+        run: |
+          ROOT=/tmp/gestion-tecnica-publica
+          test ! -e "$ROOT/.env"
+          if find "$ROOT" -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) | grep -q .; then
+            echo 'Se encontraron archivos privados bloqueados.' >&2
+            exit 1
+          fi
+          if find "$ROOT" -type f | grep -Ei '/[^/]*dms[^/]*$' | grep -q .; then
+            echo 'Todavía existen nombres de archivo con la marca anterior.' >&2
+            exit 1
+          fi
+          if grep -RIlE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' "$ROOT" --exclude-dir=.git | grep -q .; then
+            echo 'Todavía existen referencias internas identificables.' >&2
+            exit 1
+          fi
+          if grep -RIlE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/' "$ROOT" --exclude-dir=.git | grep -q .; then
+            echo 'Todavía existen enlaces privados.' >&2
+            exit 1
+          fi
+          if grep -RIlF -- '-----BEGIN PRIVATE KEY-----' "$ROOT" --exclude-dir=.git | grep -q .; then
+            echo 'Todavía existe material de llave privada.' >&2
+            exit 1
+          fi
+
+      - name: Validar aplicación
+        shell: bash
+        run: |
+          cd /tmp/gestion-tecnica-publica
+          npm ci
+          npm run build
+          cd backend
+          npm ci
+          npm run check --if-present
+          cd /tmp/gestion-tecnica-publica
+          rm -rf node_modules backend/node_modules dist backend/dist coverage backend/coverage
+
+      - name: Publicar un único historial limpio
+        shell: bash
+        env:
+          TRIGGER_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout --orphan public-main
+          git rm -rf . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a /tmp/gestion-tecnica-publica/. .
+          git add -A
+          git commit -m 'Publicar sistema genérico de boletas y mantenimientos'
+          git push --force origin HEAD:main
+          git push origin --delete "$TRIGGER_BRANCH" || true

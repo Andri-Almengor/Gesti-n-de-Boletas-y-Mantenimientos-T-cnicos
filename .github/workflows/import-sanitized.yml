@@ -5,9 +5,12 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/import-sanitized.yml'
+  pull_request_target:
+    types: [opened, synchronize]
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   import-sanitized:
@@ -17,6 +20,7 @@ jobs:
       - name: Descargar repositorio de destino
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Descargar aplicación actual
@@ -27,249 +31,14 @@ jobs:
           path: source-app
           fetch-depth: 1
 
-      - name: Preparar copia aislada
-        shell: bash
-        run: |
-          rm -rf /tmp/gestion-tecnica-publica
-          mkdir -p /tmp/gestion-tecnica-publica
-          rsync -a --delete --exclude='.git' source-app/ /tmp/gestion-tecnica-publica/
+      - name: Crear versión pública sanitizada
+        run: python3 .github/scripts/sanitize_public_copy.py source-app /tmp/gestion-tecnica-publica
 
-      - name: Eliminar marcas y datos sensibles
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          from urllib.parse import urlparse
-          import base64
-          import json
-          import os
-          import re
-          import shutil
-
-          root = Path('/tmp/gestion-tecnica-publica')
-
-          # Archivos y carpetas que nunca deben publicarse.
-          blocked_dir_names = {
-              '.git', '.idea', '.vscode', 'node_modules', 'dist', 'build', 'coverage',
-              'uploads', 'exports', 'backups', 'backup', 'logs', 'tmp', 'temp',
-              '.cache', '.turbo', '.next', '__pycache__'
-          }
-          blocked_suffixes = {
-              '.pem', '.key', '.p12', '.pfx', '.crt', '.cer', '.jks', '.keystore',
-              '.sqlite', '.sqlite3', '.db', '.bak', '.log', '.xlsx', '.xls', '.csv',
-              '.zip', '.7z', '.rar'
-          }
-          sensitive_name_parts = {
-              'service-account', 'service_account', 'credentials', 'credential',
-              'private-key', 'private_key', 'oauth-client', 'oauth_client',
-              'secret-backup', 'database-dump', 'database_dump'
-          }
-
-          for path in sorted(root.rglob('*'), key=lambda item: len(item.parts), reverse=True):
-              lower_name = path.name.lower()
-              if path.is_dir() and lower_name in blocked_dir_names:
-                  shutil.rmtree(path, ignore_errors=True)
-                  continue
-              if not path.is_file():
-                  continue
-              if path.suffix.lower() in blocked_suffixes:
-                  path.unlink(missing_ok=True)
-                  continue
-              if lower_name.startswith('.env') and lower_name not in {'.env.example', '.env.sample'}:
-                  path.unlink(missing_ok=True)
-                  continue
-              if any(part in lower_name for part in sensitive_name_parts):
-                  path.unlink(missing_ok=True)
-
-          # No se copian automatizaciones de despliegue o importación del repositorio privado.
-          workflows = root / '.github' / 'workflows'
-          if workflows.exists():
-              shutil.rmtree(workflows)
-
-          replacements = {
-              'Digital Management Systems, S.A.': 'Empresa de Servicios Técnicos',
-              'Digital Management Systems S.A.': 'Empresa de Servicios Técnicos',
-              'Digital Management Systems': 'Empresa de Servicios Técnicos',
-              'DMS Boletas': 'Gestión de Boletas',
-              'DMS_Boletas': 'Gestion_Boletas',
-              'dms-boletas': 'gestion-boletas-mantenimientos',
-              'DMS LectorCedulas': 'Lector de documentos',
-              'DMS_LectorCedulas': 'lector_documentos',
-              'Andrick Almengor': 'Usuario Administrador',
-              'Andrick Almengor Quirós': 'Usuario Administrador',
-              'Andrick Almengor Quiros': 'Usuario Administrador',
-              'Andri Almengor': 'Usuario Administrador',
-              'Yehuda Carmona': 'Supervisor Técnico',
-              'Roy Umaña': 'Gerencia Administrativa',
-              'Alejandra Umaña': 'Asistencia Administrativa',
-              'Raúl Mayorga': 'Responsable Técnico',
-              'Raul Mayorga': 'Responsable Técnico',
-              'Francisco Murillo': 'Técnico de ejemplo',
-              'Dixon Mora': 'Técnico de ejemplo',
-              'Yasdani Valdivia': 'Técnico de ejemplo',
-              'Freddy Fernández': 'Técnico de ejemplo',
-              'Freddy Fernandez': 'Técnico de ejemplo',
-              'Jorge Espinoza': 'Técnico de ejemplo',
-              'Asamblea Legislativa de Costa Rica': 'Cliente de ejemplo',
-              'Asamblea Legislativa': 'Cliente de ejemplo',
-              'Banco Central de Costa Rica': 'Cliente de ejemplo',
-              'Banco Central': 'Cliente de ejemplo',
-              'Banco de Costa Rica': 'Cliente de ejemplo',
-              'Promerica': 'Cliente de ejemplo',
-              'Acueductos y Alcantarillados': 'Cliente de ejemplo',
-              'CCSS': 'Cliente de ejemplo',
-              'Instituto Costarricense de Electricidad': 'Cliente de ejemplo',
-              'Instituto Nacional de Seguros': 'Cliente de ejemplo',
-              'Ministerio de Hacienda': 'Cliente de ejemplo',
-              'Ministerio de Salud': 'Cliente de ejemplo',
-              'Amazon Support Services': 'Cliente de ejemplo',
-              'Boston Scientific': 'Cliente de ejemplo',
-              'ICU Medical Costa Rica Ltd': 'Cliente de ejemplo',
-              'Junta Administrativa del Registro Nacional': 'Cliente de ejemplo',
-              'Azucarera El Viejo': 'Cliente de ejemplo',
-              'Abbott Medical': 'Cliente de ejemplo',
-              'CBRE': 'Cliente de ejemplo',
-              'ADT': 'Cliente de ejemplo',
-          }
-
-          safe_hosts = {
-              'localhost', '127.0.0.1', '0.0.0.0', 'example.com', 'example.org',
-              'example.invalid', 'github.com', 'api.github.com', 'raw.githubusercontent.com',
-              'registry.npmjs.org', 'npmjs.com', 'nodejs.org', 'react.dev', 'vite.dev',
-              'vitejs.dev', 'developer.mozilla.org', 'developers.google.com',
-              'fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com',
-              'cdnjs.cloudflare.com', 'unpkg.com', 'cdn.jsdelivr.net', 'schema.org'
-          }
-
-          url_pattern = re.compile(r'https?://[^\s\"\'<>`)}\]]+')
-          email_pattern = re.compile(r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b')
-          ipv4_pattern = re.compile(r'(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])')
-          phone_pattern = re.compile(r'(?<!\d)(?:\+?506[\s-]?)?\d{4}[\s-]?\d{4}(?!\d)')
-          private_key_pattern = re.compile(r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----', re.S)
-
-          def sanitize_url(match):
-              raw = match.group(0)
-              trimmed = raw.rstrip('.,;:')
-              punctuation = raw[len(trimmed):]
-              try:
-                  parsed = urlparse(trimmed)
-                  host = (parsed.hostname or '').lower()
-              except Exception:
-                  return 'https://example.invalid' + punctuation
-              if host in safe_hosts or host.endswith('.npmjs.org'):
-                  return trimmed + punctuation
-              if host in {'script.google.com', 'docs.google.com', 'drive.google.com', 'chat.googleapis.com'}:
-                  return 'https://example.invalid/configure-google-service' + punctuation
-              if 'render.com' in host or 'onrender.com' in host:
-                  return 'https://example.invalid/configure-backend' + punctuation
-              return 'https://example.invalid/configure-service' + punctuation
-
-          def sanitize_text(text):
-              for original, replacement in replacements.items():
-                  text = re.sub(re.escape(original), replacement, text, flags=re.I)
-              text = re.sub(r'\bDMS\b', 'Gestión Técnica', text)
-              text = re.sub(r'\bdms\b', 'gestion', text)
-              text = private_key_pattern.sub('PRIVATE_KEY_REMOVED', text)
-              text = email_pattern.sub('usuario@ejemplo.com', text)
-              text = phone_pattern.sub('0000-0000', text)
-              text = ipv4_pattern.sub(lambda match: match.group(0) if match.group(0) in {'127.0.0.1', '0.0.0.0'} else '192.0.2.10', text)
-              text = url_pattern.sub(sanitize_url, text)
-
-              # Valores asignados directamente a variables sensibles.
-              text = re.sub(
-                  r'(?im)^(\s*(?:(?:export\s+)?(?:const|let|var)\s+)?[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|WEBHOOK_URL|SPREADSHEET_ID|FOLDER_ID|TEMPLATE_ID|DEPLOYMENT_ID)[A-Z0-9_]*\s*[:=]\s*)([\"\'])(.*?)(\2)(\s*[,;]?)$',
-                  lambda match: f'{match.group(1)}{match.group(2)}CONFIGURE_ME{match.group(2)}{match.group(5)}',
-                  text,
-              )
-              return text
-
-          # Sustituye recursos gráficos para no publicar logotipos, firmas ni capturas internas.
-          transparent_png = base64.b64decode(
-              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
-          )
-          transparent_gif = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==')
-          placeholder_svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-          <rect width="512" height="512" rx="96" fill="#9f151d"/>
-          <path d="M128 144h256v224H128z" fill="#fff" opacity=".96"/>
-          <path d="M176 208h160M176 256h160M176 304h104" stroke="#9f151d" stroke-width="24" stroke-linecap="round"/>
-          </svg>'''
-
-          image_suffixes = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.ico'}
-          text_like_suffixes = {
-              '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.json', '.md', '.txt',
-              '.html', '.css', '.scss', '.yml', '.yaml', '.xml', '.toml', '.ini',
-              '.properties', '.sh', '.ps1', '.bat', '.sql', '.gs', '.env', '.example'
-          }
-
-          for path in sorted(root.rglob('*')):
-              if not path.is_file():
-                  continue
-              suffix = path.suffix.lower()
-              if suffix in image_suffixes:
-                  if suffix == '.svg':
-                      path.write_text(placeholder_svg, encoding='utf-8')
-                  elif suffix == '.gif':
-                      path.write_bytes(transparent_gif)
-                  elif suffix == '.png':
-                      path.write_bytes(transparent_png)
-                  else:
-                      # Se eliminan formatos que podrían contener capturas o metadatos privados.
-                      path.unlink(missing_ok=True)
-                  continue
-
-              try:
-                  if path.stat().st_size > 5_000_000:
-                      continue
-                  raw = path.read_bytes()
-                  if b'\x00' in raw[:4096]:
-                      continue
-                  text = raw.decode('utf-8')
-              except (UnicodeDecodeError, OSError):
-                  continue
-              cleaned = sanitize_text(text)
-              if cleaned != text:
-                  path.write_text(cleaned, encoding='utf-8')
-
-          # Renombra rutas que todavía contengan la marca anterior.
-          for path in sorted(root.rglob('*'), key=lambda item: len(item.parts), reverse=True):
-              if not path.exists():
-                  continue
-              new_name = re.sub('dms', 'gestion', path.name, flags=re.I)
-              if new_name != path.name:
-                  target = path.with_name(new_name)
-                  if not target.exists():
-                      path.rename(target)
-
-          # Configuración pública y documentación neutral.
-          (root / '.env.example').write_text('''# Copie este archivo como .env y complete los valores en su entorno privado.\nNODE_ENV=development\nPORT=3000\nFRONTEND_ORIGIN=http://localhost:5173\nGOOGLE_SPREADSHEET_ID=CONFIGURE_ME\nGOOGLE_DRIVE_ROOT_FOLDER_ID=CONFIGURE_ME\nGOOGLE_SERVICE_ACCOUNT_EMAIL=usuario@ejemplo.com\nGOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=CONFIGURE_ME\nAPPS_SCRIPT_WEB_APP_URL=https://example.invalid/configure-google-service\nSESSION_SECRET=CONFIGURE_A_LONG_RANDOM_SECRET\nGEMINI_API_KEY=CONFIGURE_ME\n''', encoding='utf-8')
-
-          readme = '''# Gestión de Boletas y Mantenimientos Técnicos\n\nAplicación web de referencia para administrar boletas de servicio, mantenimientos, dispositivos, evidencias, firmas, documentos y métricas operativas.\n\n## Tecnologías\n\n- React y Vite\n- Node.js y Express\n- Google Sheets y Google Drive\n- Google Apps Script\n- PWA con soporte de trabajo sin conexión\n\n## Seguridad\n\nEste repositorio es una versión pública sanitizada. No contiene credenciales, identificadores reales de Google, webhooks, datos de clientes, nombres del personal, firmas, fotografías ni archivos exportados.\n\nNunca almacene secretos directamente en el código. Configure las variables de entorno usando `.env.example` y mantenga el archivo `.env` fuera de Git.\n\n## Instalación\n\n```bash\nnpm install\ncd backend && npm install\n```\n\nEjecute el frontend y el backend según los scripts definidos en sus respectivos `package.json`. Para utilizar las integraciones de Google debe crear sus propios recursos y completar las variables de entorno.\n\n## Alcance funcional\n\n- Gestión de boletas pendientes y finalizadas.\n- Registro de mantenimientos y dispositivos.\n- Evidencias fotográficas y firmas digitales.\n- Generación de documentos mediante integraciones configurables.\n- Roles, permisos, auditoría y métricas administrativas.\n- Sincronización y recuperación de formularios.\n'''
-          (root / 'README.md').write_text(readme, encoding='utf-8')
-
-          security = '''# Seguridad\n\n- No publique archivos `.env`, llaves privadas, cuentas de servicio o tokens.\n- Use secretos del proveedor de despliegue para las credenciales.\n- Rote inmediatamente cualquier credencial que haya sido expuesta.\n- Restrinja los permisos de Google Drive y Google Sheets al mínimo necesario.\n- Revise los registros de auditoría y mantenga actualizadas las dependencias.\n'''
-          (root / 'SECURITY.md').write_text(security, encoding='utf-8')
-
-          report = '''# Informe de sanitización\n\nLa copia pública fue creada desde una instantánea del código, sin copiar el historial Git del proyecto operativo.\n\nSe eliminaron o reemplazaron:\n\n- Marca, nombres y referencias de la empresa original.\n- Nombres del personal y clientes identificados.\n- Correos, teléfonos, direcciones IP y enlaces privados.\n- Identificadores de Sheets, Drive, Apps Script, plantillas y webhooks.\n- Archivos de entorno, credenciales, certificados, bases de datos, exportaciones y registros.\n- Logotipos, firmas, fotografías y capturas internas.\n- Flujos de despliegue ligados al entorno original.\n\nAntes de desplegar esta versión se deben crear recursos nuevos y completar las variables de entorno.\n'''
-          (root / 'SANITIZATION_REPORT.md').write_text(report, encoding='utf-8')
-
-          # Flujo de validación genérico, sin despliegues ni secretos.
-          workflow_dir = root / '.github' / 'workflows'
-          workflow_dir.mkdir(parents=True, exist_ok=True)
-          (workflow_dir / 'validate.yml').write_text('''name: Validar aplicación\n\non:\n  push:\n  pull_request:\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npm run build\n      - run: npm ci\n        working-directory: backend\n      - run: npm run check --if-present\n        working-directory: backend\n''', encoding='utf-8')
-
-          # Asegura que los archivos privados permanezcan ignorados.
-          gitignore = root / '.gitignore'
-          current_ignore = gitignore.read_text(encoding='utf-8') if gitignore.exists() else ''
-          additions = '''\n# Información privada\n.env\n.env.*\n!.env.example\n*.pem\n*.key\n*.p12\n*.pfx\n*.jks\n*.keystore\n*.sqlite\n*.sqlite3\n*.db\n*.log\n/uploads/\n/exports/\n/backups/\n'''
-          gitignore.write_text(current_ignore.rstrip() + additions, encoding='utf-8')
-          PY
-
-      - name: Verificar ausencia de información privada
+      - name: Verificar archivos y referencias bloqueadas
         shell: bash
         run: |
           cd /tmp/gestion-tecnica-publica
           test ! -e .env
-          test ! -e source-app
           if find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) | grep -q .; then
             echo 'Se encontraron archivos privados bloqueados.' >&2
             exit 1
@@ -293,7 +62,7 @@ jobs:
           npm ci
           npm run check --if-present
 
-      - name: Publicar historial limpio
+      - name: Publicar con historial nuevo
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'

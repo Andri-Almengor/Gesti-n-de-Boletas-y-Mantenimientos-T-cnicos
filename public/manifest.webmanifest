@@ -1,0 +1,23 @@
+{
+  "name": "Gestión de Boletas",
+  "short_name": "Gestión de Boletas",
+  "description": "Gestión de boletas técnicas, mantenimientos, dispositivos y evidencias de GT.",
+  "lang": "es-CR",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#fbf8f7",
+  "theme_color": "#af101a",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/gt-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

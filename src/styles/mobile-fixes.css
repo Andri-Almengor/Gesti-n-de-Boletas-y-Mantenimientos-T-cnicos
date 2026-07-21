@@ -1,0 +1,126 @@
+/* Ajustes visuales detectados en pruebas reales */
+
+/* Botón de filtros: el icono y el contador usan clases independientes. */
+.filter-trigger {
+  position: relative;
+  display: grid !important;
+  place-items: center;
+  overflow: visible;
+}
+
+.filter-trigger > .filter-trigger__glyph {
+  position: static !important;
+  width: 24px !important;
+  min-width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: currentColor !important;
+  font-size: 22px !important;
+  font-weight: 400 !important;
+  display: grid !important;
+  place-items: center;
+}
+
+.filter-trigger > .filter-trigger__count {
+  position: absolute;
+  right: -5px;
+  top: -5px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  font-size: .66rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+
+/* Lista de boletas: una columna en móvil y dos columnas fijas en escritorio. */
+.ticket-card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 26px 18px;
+}
+
+.ticket-grid-item {
+  min-width: 0;
+}
+
+.ticket-grid-item > h2 {
+  margin: 0 0 11px 4px;
+  color: var(--muted);
+  font-size: .74rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ticket-grid-item .ticket-card {
+  height: calc(100% - 26px);
+}
+
+/* Este panel ya no se renderiza; se mantiene oculto como protección. */
+.desktop-filter-panel {
+  display: none !important;
+}
+
+.readonly-notice {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--outline-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-low);
+  color: var(--muted);
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: .8rem;
+  line-height: 1.45;
+}
+
+.readonly-notice .material-symbols-outlined {
+  color: var(--primary);
+  font-size: 20px;
+  flex: 0 0 auto;
+}
+
+@media (min-width: 760px) {
+  .ticket-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  /* En móvil el icono de sección ocupaba una cuarta celda y empujaba el título. */
+  .ticket-detail-section summary {
+    min-height: 58px;
+    padding: 12px 14px;
+    grid-template-columns: 4px minmax(0, 1fr) 24px;
+    gap: 10px;
+  }
+
+  .ticket-detail-section summary > .section-marker + .material-symbols-outlined {
+    display: none;
+  }
+
+  .ticket-detail-section summary > strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
+
+  .ticket-detail-section summary > .material-symbols-outlined:last-child {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .ticket-detail-actions {
+    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 6px);
+  }
+}

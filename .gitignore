@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Información privada
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.sqlite
+*.sqlite3
+*.db
+*.log
+/uploads/
+/exports/
+/backups/

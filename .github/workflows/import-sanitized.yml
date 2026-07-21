@@ -27,21 +27,34 @@ jobs:
       - name: Crear versión pública sanitizada
         run: python3 .github/scripts/sanitize_public_copy.py source-app /tmp/gestion-tecnica-publica
 
+      - name: Registrar auditoría interna
+        shell: bash
+        run: |
+          cd /tmp/gestion-tecnica-publica
+          {
+            echo 'ARCHIVOS BLOQUEADOS:'
+            find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) || true
+            echo 'REFERENCIAS INTERNAS:'
+            grep -RInE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' . --exclude-dir=.git || true
+            echo 'ENLACES O LLAVES:'
+            grep -RInE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/|-----BEGIN [A-Z ]*PRIVATE KEY-----' . --exclude-dir=.git || true
+          } > /tmp/sanitization-audit.txt
+
       - name: Verificar archivos y referencias bloqueadas
         shell: bash
         run: |
           cd /tmp/gestion-tecnica-publica
           test ! -e .env
           if find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) | grep -q .; then
-            echo 'Se encontraron archivos privados bloqueados.' >&2
+            cat /tmp/sanitization-audit.txt
             exit 1
           fi
           if grep -RIlE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' . --exclude-dir=.git | grep -q .; then
-            echo 'Todavía existen referencias internas identificables.' >&2
+            cat /tmp/sanitization-audit.txt
             exit 1
           fi
           if grep -RIlE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/|-----BEGIN [A-Z ]*PRIVATE KEY-----' . --exclude-dir=.git | grep -q .; then
-            echo 'Todavía existen enlaces o llaves sensibles.' >&2
+            cat /tmp/sanitization-audit.txt
             exit 1
           fi
 
@@ -56,9 +69,12 @@ jobs:
           npm run check --if-present
 
       - name: Empaquetar repositorio sanitizado
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: repositorio-sanitizado
-          path: /tmp/gestion-tecnica-publica
+          path: |
+            /tmp/gestion-tecnica-publica
+            /tmp/sanitization-audit.txt
           include-hidden-files: true
           retention-days: 1

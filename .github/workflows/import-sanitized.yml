@@ -1,20 +1,23 @@
-name: Generar copia pública sanitizada
+name: Publicar copia pública sanitizada
 
 on:
   pull_request:
     types: [opened, synchronize]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
-  sanitize-and-build:
+  sanitize-build-publish:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Descargar herramientas de sanitización
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
 
       - name: Descargar aplicación actual
         uses: actions/checkout@v4
@@ -27,44 +30,42 @@ jobs:
       - name: Crear versión pública sanitizada
         run: python3 .github/scripts/sanitize_public_copy.py source-app /tmp/gestion-tecnica-publica
 
-      - name: Registrar auditoría interna
+      - name: Limpiar identificadores y archivos generados
         shell: bash
         run: |
-          cd /tmp/gestion-tecnica-publica
-          {
-            echo 'ARCHIVOS BLOQUEADOS:'
-            find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) || true
-            echo 'REFERENCIAS INTERNAS:'
-            grep -RInE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' . --exclude-dir=.git || true
-            echo 'ENLACES PRIVADOS:'
-            grep -RInE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/' . --exclude-dir=.git || true
-            echo 'LLAVES PRIVADAS:'
-            grep -RInF -- '-----BEGIN PRIVATE KEY-----' . --exclude-dir=.git || true
-          } > /tmp/sanitization-audit.txt
+          ROOT=/tmp/gestion-tecnica-publica
+          if [ -f "$ROOT/public/icons/dms-icon.svg" ]; then
+            mv "$ROOT/public/icons/dms-icon.svg" "$ROOT/public/icons/gt-icon.svg"
+          fi
+          rm -rf "$ROOT/node_modules" "$ROOT/backend/node_modules" "$ROOT/dist" "$ROOT/backend/dist" "$ROOT/coverage" "$ROOT/backend/coverage"
 
-      - name: Verificar archivos y referencias bloqueadas
+      - name: Auditar copia pública
         shell: bash
         run: |
-          cd /tmp/gestion-tecnica-publica
-          test ! -e .env
-          if find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) | grep -q .; then
-            cat /tmp/sanitization-audit.txt
+          ROOT=/tmp/gestion-tecnica-publica
+          test ! -e "$ROOT/.env"
+          if find "$ROOT" -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.sqlite' -o -name '*.db' -o -name '*.xlsx' -o -name '*.csv' \) | grep -q .; then
+            echo 'Se encontraron archivos privados bloqueados.' >&2
             exit 1
           fi
-          if grep -RIlE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' . --exclude-dir=.git | grep -q .; then
-            cat /tmp/sanitization-audit.txt
+          if find "$ROOT" -type f | grep -Ei '/[^/]*dms[^/]*$' | grep -q .; then
+            echo 'Todavía existen nombres de archivo con la marca anterior.' >&2
             exit 1
           fi
-          if grep -RIlE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/' . --exclude-dir=.git | grep -q .; then
-            cat /tmp/sanitization-audit.txt
+          if grep -RIlE 'Digital Management Systems|DMS Boletas|Andrick Almengor|Yehuda Carmona|Roy Umaña|Asamblea Legislativa|ICU Medical|Junta Administrativa del Registro Nacional' "$ROOT" --exclude-dir=.git | grep -q .; then
+            echo 'Todavía existen referencias internas identificables.' >&2
             exit 1
           fi
-          if grep -RIlF -- '-----BEGIN PRIVATE KEY-----' . --exclude-dir=.git | grep -q .; then
-            cat /tmp/sanitization-audit.txt
+          if grep -RIlE 'script\.google\.com/macros/s/[^ ]+|chat\.googleapis\.com/v1/spaces/' "$ROOT" --exclude-dir=.git | grep -q .; then
+            echo 'Todavía existen enlaces privados.' >&2
+            exit 1
+          fi
+          if grep -RIlF -- '-----BEGIN PRIVATE KEY-----' "$ROOT" --exclude-dir=.git | grep -q .; then
+            echo 'Todavía existe material de llave privada.' >&2
             exit 1
           fi
 
-      - name: Validar compilación
+      - name: Validar aplicación
         shell: bash
         run: |
           cd /tmp/gestion-tecnica-publica
@@ -73,14 +74,21 @@ jobs:
           cd backend
           npm ci
           npm run check --if-present
+          cd /tmp/gestion-tecnica-publica
+          rm -rf node_modules backend/node_modules dist backend/dist coverage backend/coverage
 
-      - name: Empaquetar repositorio sanitizado
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: repositorio-sanitizado
-          path: |
-            /tmp/gestion-tecnica-publica
-            /tmp/sanitization-audit.txt
-          include-hidden-files: true
-          retention-days: 1
+      - name: Publicar con historial limpio
+        shell: bash
+        env:
+          TRIGGER_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout --orphan public-main
+          git rm -rf . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a /tmp/gestion-tecnica-publica/. .
+          git add -A
+          git commit -m 'Publicar sistema genérico de boletas y mantenimientos'
+          git push --force origin HEAD:main
+          git push origin --delete "$TRIGGER_BRANCH" || true

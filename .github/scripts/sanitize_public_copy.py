@@ -107,8 +107,11 @@ url_pattern = re.compile(r'https?://[^\s\"\'<>`)}\]]+')
 email_pattern = re.compile(r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b')
 phone_pattern = re.compile(r'(?<!\d)(?:\+?506[\s-]?\d{4}[\s-]?\d{4}|\d{4}[\s-]\d{4})(?!\d)')
 ipv4_pattern = re.compile(r'(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])')
-private_key_pattern = re.compile(
+private_key_block_pattern = re.compile(
     r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----', re.S
+)
+resource_candidate_pattern = re.compile(
+    r'(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{25,80}(?![A-Za-z0-9_-])'
 )
 
 
@@ -139,22 +142,40 @@ def sanitize_ip(match: re.Match[str]) -> str:
     return '192.0.2.10'
 
 
-def sanitize_text(text: str) -> str:
+def sanitize_resource_candidate(match: re.Match[str]) -> str:
+    value = match.group(0)
+    has_upper = any(char.isupper() for char in value)
+    has_lower = any(char.islower() for char in value)
+    has_digit = any(char.isdigit() for char in value)
+    has_separator = '-' in value or '_' in value
+    if has_upper and has_lower and has_digit and has_separator:
+        return 'CONFIGURE_ME'
+    return value
+
+
+def replace_bounded(text: str, original: str, replacement: str) -> str:
+    pattern = rf'(?<![A-Za-z0-9_]){re.escape(original)}(?![A-Za-z0-9_])'
+    return re.sub(pattern, replacement, text, flags=re.I)
+
+
+def sanitize_text(text: str, path: Path) -> str:
     for original, replacement in replacements.items():
-        text = re.sub(re.escape(original), replacement, text, flags=re.I)
+        text = replace_bounded(text, original, replacement)
+
     # Mantiene identificadores válidos cuando la sigla aparece en código.
     text = re.sub(r'\bDMS\b', 'GT', text)
     text = re.sub(r'\bdms\b', 'gt', text)
-    text = private_key_pattern.sub('PRIVATE_KEY_REMOVED', text)
+    text = private_key_block_pattern.sub('PRIVATE_KEY_REMOVED', text)
+    text = text.replace('-----BEGIN PRIVATE KEY-----', 'PRIVATE_KEY_HEADER_REMOVED')
+    text = text.replace('-----END PRIVATE KEY-----', 'PRIVATE_KEY_FOOTER_REMOVED')
     text = email_pattern.sub('usuario@ejemplo.com', text)
     text = phone_pattern.sub('0000-0000', text)
     text = ipv4_pattern.sub(sanitize_ip, text)
     text = url_pattern.sub(sanitize_url, text)
-    text = re.sub(
-        r'(?im)^(\s*(?:(?:export\s+)?(?:const|let|var)\s+)?[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|WEBHOOK_URL|SPREADSHEET_ID|FOLDER_ID|TEMPLATE_ID|DEPLOYMENT_ID)[A-Z0-9_]*\s*[:=]\s*)([\"\'])(.*?)(\2)(\s*[,;]?)$',
-        lambda m: f'{m.group(1)}{m.group(2)}CONFIGURE_ME{m.group(2)}{m.group(5)}',
-        text,
-    )
+
+    # Elimina identificadores de Drive, Sheets, Docs y despliegues sin tocar lockfiles.
+    if path.name not in {'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'}:
+        text = resource_candidate_pattern.sub(sanitize_resource_candidate, text)
     return text
 
 
@@ -187,11 +208,11 @@ for path in sorted(root.rglob('*')):
         text = raw.decode('utf-8')
     except (UnicodeDecodeError, OSError):
         continue
-    cleaned = sanitize_text(text)
+    cleaned = sanitize_text(text, path)
     if cleaned != text:
         path.write_text(cleaned, encoding='utf-8')
 
-(root / '.env.example').write_text('''# Copie este archivo como .env y complete los valores en un entorno privado.
+root_env = '''# Copie este archivo como .env y complete los valores en un entorno privado.
 NODE_ENV=development
 PORT=3000
 FRONTEND_ORIGIN=http://localhost:5173
@@ -202,7 +223,31 @@ GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=CONFIGURE_ME
 APPS_SCRIPT_WEB_APP_URL=https://example.invalid/configure-google-service
 SESSION_SECRET=CONFIGURE_A_LONG_RANDOM_SECRET
 GEMINI_API_KEY=CONFIGURE_ME
-''', encoding='utf-8')
+'''
+(root / '.env.example').write_text(root_env, encoding='utf-8')
+
+backend_env = '''NODE_ENV=development
+PORT=10000
+GOOGLE_SHEET_ID=CONFIGURE_ME
+GOOGLE_SERVICE_ACCOUNT_EMAIL=usuario@ejemplo.com
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=CONFIGURE_ME
+SESSION_HOURS=12
+FRONTEND_ORIGIN=http://localhost:5173
+APP_PUBLIC_URL=http://localhost:10000
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM="Gestión de Boletas <usuario@ejemplo.com>"
+GOOGLE_CHAT_WEBHOOK=
+APPS_SCRIPT_REPORT_URL=https://example.invalid/configure-google-service
+APPS_SCRIPT_REPORT_SECRET=CONFIGURE_ME
+GEMINI_API_KEY=CONFIGURE_ME
+'''
+backend_dir = root / 'backend'
+backend_dir.mkdir(parents=True, exist_ok=True)
+(backend_dir / '.env.example').write_text(backend_env, encoding='utf-8')
 
 (root / 'README.md').write_text('''# Gestión de Boletas y Mantenimientos Técnicos
 
